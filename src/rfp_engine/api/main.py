@@ -1,15 +1,20 @@
+import os
 from typing import Any, Dict, List
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from rfp_engine.config import settings
 from rfp_engine.ingestion.parser import RFPParser
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
-from rfp_engine.synthesis.generator import RFPSynthesizer, RFPSynthesisReport
+from rfp_engine.synthesis.generator import (
+    GoNoGoAnalysis,
+    N7BiddingDossier,
+    RFPSynthesizer,
+)
 
 app = FastAPI(
-    title=settings.app_name,
-    description="Moteur d'analyse d'appels d'offres, recherche hybride & synthèse LLM (Llama 3.1 Local)",
-    version="0.1.0",
+    title="N7 Consulting RFP Copilot",
+    description="Moteur de Décision & Stratégie d'Avant-Vente pour N7 Consulting (ENSEEIHT)",
+    version="0.3.0",
 )
 
 engine = HybridSearchEngine()
@@ -18,24 +23,42 @@ synthesizer = RFPSynthesizer(model_name="ollama/llama3.1:8b")
 
 class IngestResponse(BaseModel):
     message: str
+    filename: str
     total_requirements: int
 
 
-class SearchResponse(BaseModel):
-    query: str
-    count: int
-    results: List[Dict[str, Any]]
+class ChatRequest(BaseModel):
+    question: str
+    top_k: int = 5
+
+
+class ChatResponse(BaseModel):
+    question: str
+    answer: str
+    sources: List[Dict[str, Any]]
 
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": settings.app_name}
+    return {"status": "ok", "app": "N7 RFP Copilot"}
 
 
-@app.post("/index", response_model=IngestResponse)
-def index_rfp(pdf_path: str = "data/sample_rfp.pdf"):
+@app.post("/upload", response_model=IngestResponse)
+async def upload_pdf(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(
+            status_code=400, detail="Seuls les fichiers PDF sont acceptés."
+        )
+
+    os.makedirs("data", exist_ok=True)
+    save_path = os.path.join("data", file.filename)
+
+    with open(save_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
     try:
-        parser = RFPParser(pdf_path)
+        parser = RFPParser(save_path)
         requirements = parser.parse()
         docs = [
             {
@@ -48,40 +71,54 @@ def index_rfp(pdf_path: str = "data/sample_rfp.pdf"):
         ]
         engine.index_documents(docs)
         return IngestResponse(
-            message=f"Document {pdf_path} indexé avec succès.",
+            message="Appel d'offres indexé pour N7 Consulting.",
+            filename=file.filename,
             total_requirements=len(docs),
         )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Fichier PDF non trouvé.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, detail=f"Erreur d'indexation: {str(e)}"
+        )
 
 
-@app.get("/search", response_model=SearchResponse)
-def search_requirements(
-    q: str = Query(..., description="Requête en langage naturel"),
-    top_k: int = Query(3, ge=1, le=20),
-):
-    results = engine.search(query=q, top_k=top_k)
-    return SearchResponse(query=q, count=len(results), results=results)
-
-
-@app.post("/synthesize", response_model=RFPSynthesisReport)
-def synthesize_rfp(
-    query: str = Query(
-        "Propriété intellectuelle et ingénieur Full Stack",
-        description="Sujet ou thématique à analyser",
-    ),
-    top_k: int = Query(5, ge=1, le=20),
-):
-    """
-    Récupère les exigences via la recherche hybride (BM25 + Qdrant BGE-M3)
-    puis génère une Matrice de Conformité par LLM Llama 3.1 (8B) local.
-    """
-    retrieved_docs = engine.search(query=query, top_k=top_k)
+@app.post("/chat", response_model=ChatResponse)
+def chat_n7(body: ChatRequest):
+    retrieved_docs = engine.search(query=body.question, top_k=body.top_k)
     if not retrieved_docs:
         raise HTTPException(
             status_code=404, detail="Aucune exigence trouvée."
         )
 
-    return synthesizer.generate_matrix(retrieved_docs)
+    answer = synthesizer.answer_question(body.question, retrieved_docs)
+    return ChatResponse(
+        question=body.question, answer=answer, sources=retrieved_docs
+    )
+
+
+@app.get("/gonogo", response_model=GoNoGoAnalysis)
+def get_gonogo_decision():
+    """Évalue la faisabilité Go/No-Go et le staffing ENSEEIHT."""
+    retrieved_docs = engine.search(
+        query="exigences pénalités profil livrables propriété intellectuelle",
+        top_k=10,
+    )
+    if not retrieved_docs:
+        raise HTTPException(
+            status_code=404, detail="Index vide. Uploadez d'abord un PDF."
+        )
+
+    return synthesizer.evaluate_go_nogo(retrieved_docs)
+
+
+@app.get("/dossier-n7", response_model=N7BiddingDossier)
+def generate_n7_dossier():
+    """Génère le dossier d'avant-vente complet pour l'équipe N7 Consulting."""
+    retrieved_docs = engine.search(
+        query="objet du marché profil compétences livrables planning", top_k=10
+    )
+    if not retrieved_docs:
+        raise HTTPException(
+            status_code=404, detail="Index vide. Uploadez d'abord un PDF."
+        )
+
+    return synthesizer.generate_dossier(retrieved_docs)
