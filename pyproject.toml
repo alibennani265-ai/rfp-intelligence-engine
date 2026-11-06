@@ -1,12 +1,13 @@
 [project]
 name = "rfp-intelligence-engine"
 version = "0.1.0"
-description = "Add your description here"
+description = "Moteur d'analyse d'appels d'offres, recherche hybride & synthèse LLM"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
+    "litellm>=1.50.0",
     "loguru>=0.7.3",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.2",
@@ -18,12 +19,12 @@ dependencies = [
     "uvicorn>=0.54.0",
 ]
 
-[project.scripts]
-rfp-intelligence-engine = "rfp_intelligence_engine:main"
-
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "rfp_engine"
 
 [dependency-groups]
 dev = [
