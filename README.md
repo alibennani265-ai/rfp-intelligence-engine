@@ -1,23 +1,35 @@
-# 🏢 RFP Intelligence Engine
+# 🔴 RFP Intelligence Engine — N7 Consulting
 
-> Enterprise-grade AI pipeline for automated RFP (Request for Proposal) parsing, requirement matching, and compliance scoring.
+> Assistant d'Avant-Vente, Audit CNJE, Vector Search & Copilot de Décision pour **N7 Consulting** (Junior-Entreprise de l'ENSEEIHT, Centrale Toulouse).
 
-## 📌 Executive Summary
+## 🚀 Architecture RAG & Pipeline Hybride
 
-Large enterprises and engineering consultancies spend hundreds of hours manually analyzing complex RFP tender documents. **RFP Intelligence Engine** automates this workflow:
-- **70% reduction** in RFP analysis cycle time.
-- **Hybrid Retrieval Strategy** (Dense Vector Search + Sparse BM25) ensuring 0% miss rate on technical acronyms and ISO standards.
-- Production-ready software architecture (Clean Code, FastAPI, Async Processing, Dockerized).
-
-## 🏗️ Architecture
-
-```mermaid
-graph TD
-    A[RFP PDF Documents] -->|Parser & Chunking| B(Hierarchical Requirements)
-    B -->|BGE-M3 Embeddings| C[(Qdrant Vector DB)]
-    B -->|Tokenization| D(BM25 Sparse Index)
-    E[User / Presales Query] --> F{Hybrid Search Engine}
-    C --> F
-    D --> F
-    F -->|Reranking| G[Cross-Encoder]
-    G --> H[FastAPI Endpoint / Structured Response]
+```text
+┌────────────────────────────────┐      ┌────────────────────────────────┐
+│   Appel d'Offres CCTP (PDF)    │      │   Base d'Études N7 (PDFs)      │
+└───────────────┬────────────────┘      └───────────────┬────────────────┘
+                │                                       │
+                ▼                                       ▼
+    [ RFP Parser & Chunking ]               [ Study Ingestor & Metadata ]
+                │                                       │
+                └───────────────────┬───────────────────┘
+                                    │
+                                    ▼
+                 [ Embeddings BAAI/bge-m3 + Index BM25 ]
+                                    │
+                                    ▼
+                [ Vector Store Locale Qdrant (Persistent) ]
+                ├── Collection: `rfp_requirements`
+                └── Collection: `n7_past_studies`
+                                    │
+                                    ▼
+                 [ Cross-Encoder Reranker (MiniLM-L6) ]
+                                    │
+                                    ▼
+                 [ Domain Engine (Filières SN / 3EA / MFEE & CNJE) ]
+                                    │
+                                    ▼
+                 [ Synthesis Engine (Ollama Llama 3.1 8B) ]
+                                    │
+                                    ▼
+                 [ Dashboard Streamlit & Export PDF FPDF2 ]

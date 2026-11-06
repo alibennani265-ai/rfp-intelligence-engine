@@ -5,16 +5,12 @@ from pydantic import BaseModel
 from rfp_engine.config import settings
 from rfp_engine.ingestion.parser import RFPParser
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
-from rfp_engine.synthesis.generator import (
-    GoNoGoAnalysis,
-    N7BiddingDossier,
-    RFPSynthesizer,
-)
+from rfp_engine.synthesis.generator import N7BiddingDossier, RFPSynthesizer
 
 app = FastAPI(
-    title="N7 Consulting RFP Copilot",
-    description="Moteur de Décision & Stratégie d'Avant-Vente pour N7 Consulting (ENSEEIHT)",
-    version="0.3.0",
+    title="N7 Consulting — Strategic Bidding Engine",
+    description="Assistant de Décision et d'Avant-Vente RAG pour N7 Consulting (ENSEEIHT)",
+    version="0.5.0",
 )
 
 engine = HybridSearchEngine()
@@ -40,7 +36,7 @@ class ChatResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "app": "N7 RFP Copilot"}
+    return {"status": "ok", "app": "N7 Strategic Bidding Engine"}
 
 
 @app.post("/upload", response_model=IngestResponse)
@@ -71,7 +67,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         ]
         engine.index_documents(docs)
         return IngestResponse(
-            message="Appel d'offres indexé pour N7 Consulting.",
+            message="Document d'appel d'offres indexé dans Qdrant.",
             filename=file.filename,
             total_requirements=len(docs),
         )
@@ -86,7 +82,7 @@ def chat_n7(body: ChatRequest):
     retrieved_docs = engine.search(query=body.question, top_k=body.top_k)
     if not retrieved_docs:
         raise HTTPException(
-            status_code=404, detail="Aucune exigence trouvée."
+            status_code=404, detail="Index vide. Veuillez uploader un PDF."
         )
 
     answer = synthesizer.answer_question(body.question, retrieved_docs)
@@ -95,30 +91,16 @@ def chat_n7(body: ChatRequest):
     )
 
 
-@app.get("/gonogo", response_model=GoNoGoAnalysis)
-def get_gonogo_decision():
-    """Évalue la faisabilité Go/No-Go et le staffing ENSEEIHT."""
-    retrieved_docs = engine.search(
-        query="exigences pénalités profil livrables propriété intellectuelle",
-        top_k=10,
-    )
-    if not retrieved_docs:
-        raise HTTPException(
-            status_code=404, detail="Index vide. Uploadez d'abord un PDF."
-        )
-
-    return synthesizer.evaluate_go_nogo(retrieved_docs)
-
-
 @app.get("/dossier-n7", response_model=N7BiddingDossier)
-def generate_n7_dossier():
-    """Génère le dossier d'avant-vente complet pour l'équipe N7 Consulting."""
+def generate_full_dossier():
+    """Extraction large et génération du dossier stratégique complet N7."""
     retrieved_docs = engine.search(
-        query="objet du marché profil compétences livrables planning", top_k=10
+        query="objet prestation besoin profil compétences pénalités propriété intellectuelle prix livrables planning",
+        top_k=20,
     )
     if not retrieved_docs:
         raise HTTPException(
-            status_code=404, detail="Index vide. Uploadez d'abord un PDF."
+            status_code=404, detail="Index vide. Veuillez uploader un PDF."
         )
 
     return synthesizer.generate_dossier(retrieved_docs)

@@ -1,19 +1,21 @@
 import json
+import re
 from typing import Any, Dict, List
 from litellm import completion
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from rfp_engine.domain.enseeiht_context import CNJE_RULES, ENSEEIHT_DEPARTMENTS
 
 
 class CNJECheckItem(BaseModel):
     critere: str
-    statut: str  # "CONFORME", "NON CONFORME", "À NÉGOCIER"
+    statut: str
     commentaire: str
 
 
 class ENSEEIHTStaffing(BaseModel):
-    filiere: str  # "SN", "3EA", "MFEE"
-    niveau: str  # "N7 (1ère année)", "N7 (2ème année)", "N7 (3ème année)"
+    filiere: str  # SN, 3EA ou MFEE
+    niveau: str
     nombre_etudiants: int
     competences_cles: List[str]
     role_dans_projet: str
@@ -27,17 +29,17 @@ class PhasePricing(BaseModel):
 
 
 class RiskItem(BaseModel):
-    domaine: str  # "Juridique", "Technique", "Calendrier", "Financier"
+    domaine: str
     description: str
-    impact: str  # "Élevé", "Moyen", "Faible"
+    impact: str
     plan_mitigation: str
 
 
 class N7BiddingDossier(BaseModel):
     titre_marche: str
     client: str
-    decision_gonogo: str  # "GO STRATÉGIQUE", "GO SOUS RÉSERVE", "NO-GO"
-    score_opportunite: int  # /100
+    decision_gonogo: str
+    score_opportunite: int
     synthese_executive: str
     argumentaire_commercial_n7: str
     conformite_cnje: List[CNJECheckItem]
@@ -54,199 +56,80 @@ class RFPSynthesizer:
     def __init__(self, model_name: str = "ollama/llama3.1:8b"):
         self.model_name = model_name
 
-    def answer_question(
-        self, query: str, requirements: List[Dict[str, Any]]
-    ) -> str:
-        """Chat RAG générique orienté N7 Consulting."""
+    def generate_dossier(
+        self, requirements: List[Dict[str, Any]]
+    ) -> N7BiddingDossier:
+        """Génère un dossier d'avant-vente éclairé par la base de connaissances ENSEEIHT/CNJE."""
         context_text = "\n\n".join(
             [
-                f"Clause [{req['id']}] (Section: {req['section']}):\n{req['text']}"
+                f"[{req['id']}] (Section: {req.get('section', 'N/A')}): {req['text']}"
                 for req in requirements
             ]
         )
 
-        prompt = f"""Tu es le Directeur Commercial de N7 Consulting, la Junior-Entreprise de l'ENSEEIHT (Centrale Toulouse).
-Réponds à la question de l'équipe commerciale en analysant le Cahier des Charges ci-dessous.
+        dept_info = json.dumps(ENSEEIHT_DEPARTMENTS, ensure_ascii=False, indent=2)
 
-EXTRAITS DU DOCUMENT :
+        prompt = f"""Tu es le Vice-Président Commercial de N7 Consulting, la Junior-Entreprise de l'ENSEEIHT (Centrale Toulouse).
+
+CONNAISSANCES DOMAINE OBLIGATOIRES :
+1. FILIÈRES ET COMPÉTENCES ENSEEIHT :
+{dept_info}
+
+2. RÈGLES DE CONFORMITÉ CNJE :
+{CNJE_RULES}
+
+DOCUMENT D'APPEL D me D'OFFRES À ANALYSER :
 {context_text}
 
-QUESTION : {query}
+INSTRUCTIONS DE GÉNÉRATION JSON :
+- "titre_marche" : Intitulé exact du projet extrait du document.
+- "client" : Nom de l'acheteur/client extrait du document.
+- "staffing_enseeiht" : Choisis STRICTEMENT parmi les filières ENSEEIHT ("SN", "3EA" ou "MFEE") en fonction des besoins techniques réels identifiés dans le document.
+- "conformite_cnje" : Évalue le projet au regard des règles CNJE fournies ci-dessus.
+- Tous les textes doivent être détaillés et s'appuyer sur les faits et chiffres du document.
 
-INSTRUCTIONS :
-- Base tes réponses STRICTEMENT sur les clauses extraites du document.
-- Analyse l'impact métier pour N7 Consulting (cadre CNJE, filières ENSEEIHT SN/3EA/MFEE, risques contractuels, pénalités).
-- Si une information est absente des extraits, indique-le clairement.
-"""
-        try:
-            response = completion(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"Erreur Chat LLM: {e}")
-            return "Erreur lors de la réponse du modèle. Vérifiez qu'Ollama est actif en arrière-plan."
-
-    def generate_dossier(
-        self, requirements: List[Dict[str, Any]]
-    ) -> N7BiddingDossier:
-        """Génère le dossier d'avant-vente dynamique basé exclusivement sur le PDF chargé."""
-        context_text = "\n\n".join(
-            [
-                f"[{req['id']}] (Section: {req['section']}): {req['text']}"
-                for req in requirements[:15]
-            ]
-        )
-
-        prompt = f"""Tu es le Vice-Président Commercial de N7 Consulting (Junior-Entreprise de l'ENSEEIHT).
-Analyse les clauses ci-dessous extraites d'un appel d'offres et génère un Dossier d'Avant-Vente complet au format JSON.
-
-EXTRAITS DU CAHIER DES CHARGES :
-{context_text}
-
-RÈGLES D'EXTRACTION DYNAMIQUE :
-1. "titre_marche" : Extrais l'intitulé exact ou le sujet du marché d'après le texte (ou formule un titre précis sur la base du besoin).
-2. "client" : Extrais le nom de la structure / entreprise / acheteur citée dans le texte (si non mentionné, indique "Organisme Client").
-3. "conformite_cnje" : Analyse l'adéquation avec le statut Junior-Entreprise (mission à valeur pédagogique, pas de régie pure, pas d'astreinte 24/7).
-4. "staffing_enseeiht" : Détermine la ou les filières ENSEEIHT nécessaires (SN: Informatique/Data/IA, 3EA: Électronique/Énergie/Automatique, MFEE: Mécanique des Fluides/Environnement).
-
-Format JSON attendu :
+Format JSON attendu (réponds uniquement avec l'objet JSON) :
 {{
-  "titre_marche": "Nom exact ou identifié du marché",
-  "client": "Nom du client/acheteur extrait du document",
+  "titre_marche": "...",
+  "client": "...",
   "decision_gonogo": "GO STRATÉGIQUE",
   "score_opportunite": 85,
-  "synthese_executive": "Synthèse dynamique des enjeux du besoin exprimé dans ce document.",
-  "argumentaire_commercial_n7": "Positionnement stratégique de N7 Consulting fondé sur l'excellence académique de l'ENSEEIHT et la certification ISO 9001.",
+  "synthese_executive": "...",
+  "argumentaire_commercial_n7": "...",
   "conformite_cnje": [
-    {{
-      "critere": "Valeur pédagogique de la mission",
-      "statut": "CONFORME",
-      "commentaire": "Explication basée sur le besoin technique du document."
-    }}
+    {{"critere": "Valeur Pédagogique", "statut": "CONFORME", "commentaire": "..."}}
   ],
   "staffing_enseeiht": [
     {{
-      "filiere": "SN (Sciences du Numérique)",
+      "filiere": "SN",
       "niveau": "N7 (2ème année)",
       "nombre_etudiants": 2,
-      "competences_cles": ["Compétence 1", "Compétence 2"],
-      "role_dans_projet": "Description de l'intervention."
+      "competences_cles": ["Python", "FastAPI"],
+      "role_dans_projet": "..."
     }}
   ],
   "ventilation_financiere": [
-    {{
-      "phase": "Phase 1 : Cadrage",
-      "description": "Détail de la prestation",
-      "jeh_estimes": 5,
-      "profil_associe": "Consultant N7"
-    }}
+    {{"phase": "Phase 1 : Cadrage", "description": "...", "jeh_estimes": 5, "profil_associe": "Consultant SN"}}
   ],
   "total_jeh_estime": 20,
   "matrice_risques": [
-    {{
-      "domaine": "Juridique / Technique",
-      "description": "Risque identifié dans le document",
-      "impact": "Élevé",
-      "plan_mitigation": "Action corrective proposée par N7"
-    }}
+    {{"domaine": "Technique", "description": "...", "impact": "Moyen", "plan_mitigation": "..."}}
   ],
-  "clauses_a_renegocier": ["Clause extraite à négocier"],
-  "recommandations_commerciales": ["Action d'avant-vente conseillée"]
+  "clauses_a_renegocier": ["..."],
+  "recommandations_commerciales": ["..."]
 }}
 """
-
-        logger.info(
-            "Analyse du document et génération du Dossier d'Avant-Vente..."
-        )
-
+        logger.info(f"Appel du LLM ({self.model_name}) avec contexte domaine ENSEEIHT...")
         try:
             response = completion(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                response_format={"type": "json_object"},
+                temperature=0.1,
             )
             content = response.choices[0].message.content.strip()
-
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-
-            return N7BiddingDossier.model_validate_json(content.strip())
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            raw_json = json_match.group(0) if json_match else content
+            return N7BiddingDossier.model_validate_json(raw_json)
         except Exception as e:
-            logger.error(f"Erreur lors de la génération du dossier : {e}")
-            return self._generate_fallback_dossier(requirements)
-
-    def _generate_fallback_dossier(
-        self, requirements: List[Dict[str, Any]]
-    ) -> N7BiddingDossier:
-        first_req = requirements[0] if requirements else {}
-        doc_name = first_req.get("section", "Document d'Appel d'Offres")
-
-        return N7BiddingDossier(
-            titre_marche=f"Analyse du marché : {doc_name}",
-            client="Acheteur / Organisme Émetteur",
-            decision_gonogo="GO SOUS RÉSERVE",
-            score_opportunite=75,
-            synthese_executive="Analyse basée sur les exigences extraites du document importé. Les informations spécifiques doivent être validées lors de la phase de cadrage commercial.",
-            argumentaire_commercial_n7="N7 Consulting s'appuie sur le réservoir de compétences des élèves-ingénieurs de l'ENSEEIHT et son système de management de la qualité certifié ISO 9001.",
-            conformite_cnje=[
-                CNJECheckItem(
-                    critere="Cadre pédagogique",
-                    statut="CONFORME",
-                    commentaire="L'étude doit être découpée en phases d'ingénierie réalisables par des étudiants.",
-                ),
-                CNJECheckItem(
-                    critere="Garanties & Assurances",
-                    statut="À NÉGOCIER",
-                    commentaire="Vérifier la présence de clauses de responsabilité ou de pénalités de retard.",
-                ),
-            ],
-            staffing_enseeiht=[
-                ENSEEIHTStaffing(
-                    filiere="SN (Sciences du Numérique)",
-                    niveau="N7 (2ème année)",
-                    nombre_etudiants=2,
-                    competences_cles=[
-                        "Ingénierie Logicielle",
-                        "Traitement de Données",
-                    ],
-                    role_dans_projet="Réalisation des prestations techniques.",
-                )
-            ],
-            ventilation_financiere=[
-                PhasePricing(
-                    phase="Phase 1 : Cadrage & Spécifications",
-                    description="Analyse du besoin et conception de la solution.",
-                    jeh_estimes=5,
-                    profil_associe="Consultant N7",
-                ),
-                PhasePricing(
-                    phase="Phase 2 : Réalisation & Tests",
-                    description="Implémentation et validation technique.",
-                    jeh_estimes=15,
-                    profil_associe="Consultant Développeur N7",
-                ),
-            ],
-            total_jeh_estime=20,
-            matrice_risques=[
-                RiskItem(
-                    domaine="Contractuel",
-                    description="Absence de précision sur les modalités de recette.",
-                    impact="Moyen",
-                    plan_mitigation="Valider le calendrier de livraison dès le démarrage de la convention.",
-                )
-            ],
-            clauses_a_renegocier=[
-                "Plafonner les pénalités éventuelles à 10% du montant HT."
-            ],
-            recommandations_commerciales=[
-                "Organiser un entretien de cadrage technique avec le client."
-            ],
-        )
+            logger.error(f"Erreur de validation JSON: {e}")
+            raise e
