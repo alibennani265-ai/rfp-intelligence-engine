@@ -1,0 +1,17 @@
+[
+  {
+    "query": "Quel est le prix moyen d'un JEH chez N7 Consulting ?",
+    "expected_answer": "Le prix moyen d'un JEH hors frais et avenants est de 442 € HT.",
+    "expected_keywords": ["442", "JEH", "moyen"]
+  },
+  {
+    "query": "Combien d'études ont été réalisées dans la filière SN et la filière 3EA ?",
+    "expected_answer": "La filière SN compte 30 études et la filière 3EA compte 9 études.",
+    "expected_keywords": ["SN", "30", "3EA", "9"]
+  },
+  {
+    "query": "Quel est le nombre total d'études répertoriées dans la synthèse ?",
+    "expected_answer": "Le nombre total d'études est de 40.",
+    "expected_keywords": ["40", "études"]
+  }
+]
