@@ -9,12 +9,12 @@ from rfp_engine.domain.enseeiht_context import CNJE_RULES, ENSEEIHT_DEPARTMENTS
 
 class CNJECheckItem(BaseModel):
     critere: str
-    statut: str
+    statut: str  # "CONFORME", "NON CONFORME", "À NÉGOCIER"
     commentaire: str
 
 
 class ENSEEIHTStaffing(BaseModel):
-    filiere: str  # SN, 3EA ou MFEE
+    filiere: str  # "SN", "3EA" ou "MFEE"
     niveau: str
     nombre_etudiants: int
     competences_cles: List[str]
@@ -56,14 +56,48 @@ class RFPSynthesizer:
     def __init__(self, model_name: str = "ollama/llama3.1:8b"):
         self.model_name = model_name
 
+    def answer_question(
+        self, query: str, requirements: List[Dict[str, Any]]
+    ) -> str:
+        """Génère une réponse concise et factuelle à partir des extraits récupérés."""
+        context_text = "\n\n".join(
+            [
+                f"Extrait [{req.get('id', idx)}] (Section: {req.get('section', 'N/A')}):\n{req.get('text', '')}"
+                for idx, req in enumerate(requirements)
+            ]
+        )
+
+        prompt = f"""Tu es le Directeur Commercial de N7 Consulting (Junior-Entreprise de l'ENSEEIHT, Centrale Toulouse).
+Réponds à la question suivante en t'appuyant STRICTEMENT sur les extraits ci-dessous.
+
+EXTRAITS DOCUMENTAIRES :
+{context_text}
+
+QUESTION : {query}
+
+INSTRUCTIONS :
+- Cite les faits, chiffres, montants, volumes et filières exacts figurant dans les extraits.
+- Sois très concis, factuel et précis (style cabinet de conseil).
+"""
+        try:
+            response = completion(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Erreur Chat LLM: {e}")
+            return "Erreur lors de la réponse du modèle. Vérifiez qu'Ollama est actif."
+
     def generate_dossier(
         self, requirements: List[Dict[str, Any]]
     ) -> N7BiddingDossier:
-        """Génère un dossier d'avant-vente éclairé par la base de connaissances ENSEEIHT/CNJE."""
+        """Génère un dossier d'avant-vente éclairé par le référentiel ENSEEIHT et les règles CNJE."""
         context_text = "\n\n".join(
             [
-                f"[{req['id']}] (Section: {req.get('section', 'N/A')}): {req['text']}"
-                for req in requirements
+                f"[{req.get('id', idx)}] (Section: {req.get('section', 'N/A')}): {req.get('text', '')}"
+                for idx, req in enumerate(requirements[:25])
             ]
         )
 
@@ -78,7 +112,7 @@ CONNAISSANCES DOMAINE OBLIGATOIRES :
 2. RÈGLES DE CONFORMITÉ CNJE :
 {CNJE_RULES}
 
-DOCUMENT D'APPEL D me D'OFFRES À ANALYSER :
+DOCUMENT D'APPEL D'OFFRES À ANALYSER :
 {context_text}
 
 INSTRUCTIONS DE GÉNÉRATION JSON :
@@ -86,9 +120,9 @@ INSTRUCTIONS DE GÉNÉRATION JSON :
 - "client" : Nom de l'acheteur/client extrait du document.
 - "staffing_enseeiht" : Choisis STRICTEMENT parmi les filières ENSEEIHT ("SN", "3EA" ou "MFEE") en fonction des besoins techniques réels identifiés dans le document.
 - "conformite_cnje" : Évalue le projet au regard des règles CNJE fournies ci-dessus.
-- Tous les textes doivent être détaillés et s'appuyer sur les faits et chiffres du document.
+- Remplis TOUS les champs du JSON sans utiliser de placeholders.
 
-Format JSON attendu (réponds uniquement avec l'objet JSON) :
+Format JSON attendu :
 {{
   "titre_marche": "...",
   "client": "...",
@@ -131,5 +165,5 @@ Format JSON attendu (réponds uniquement avec l'objet JSON) :
             raw_json = json_match.group(0) if json_match else content
             return N7BiddingDossier.model_validate_json(raw_json)
         except Exception as e:
-            logger.error(f"Erreur de validation JSON: {e}")
+            logger.error(f"Erreur de génération JSON: {e}")
             raise e

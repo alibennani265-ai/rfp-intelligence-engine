@@ -4,13 +4,14 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from rfp_engine.config import settings
 from rfp_engine.ingestion.parser import RFPParser
+from rfp_engine.ingestion.study_ingestor import N7PastStudyIngestor
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
 from rfp_engine.synthesis.generator import N7BiddingDossier, RFPSynthesizer
 
 app = FastAPI(
     title="N7 Consulting — Strategic Bidding Engine",
     description="Assistant de Décision et d'Avant-Vente RAG pour N7 Consulting (ENSEEIHT)",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 engine = HybridSearchEngine()
@@ -54,6 +55,9 @@ async def upload_pdf(file: UploadFile = File(...)):
         f.write(content)
 
     try:
+        global engine
+        engine = HybridSearchEngine()
+
         parser = RFPParser(save_path)
         requirements = parser.parse()
         docs = [
@@ -67,7 +71,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         ]
         engine.index_documents(docs)
         return IngestResponse(
-            message="Document d'appel d'offres indexé dans Qdrant.",
+            message="Nouveau document indexé avec succès.",
             filename=file.filename,
             total_requirements=len(docs),
         )
@@ -75,6 +79,17 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=500, detail=f"Erreur d'indexation: {str(e)}"
         )
+
+
+@app.post("/ingest-past-studies")
+def ingest_past_studies():
+    """Ingère et vectorise tous les fichiers d'anciennes études placés dans data/past_studies."""
+    ingestor = N7PastStudyIngestor()
+    total_chunks = ingestor.ingest_all("data/past_studies")
+    return {
+        "status": "ok",
+        "message": f"{total_chunks} blocs d'anciennes études N7 indexés dans Qdrant.",
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -93,10 +108,9 @@ def chat_n7(body: ChatRequest):
 
 @app.get("/dossier-n7", response_model=N7BiddingDossier)
 def generate_full_dossier():
-    """Extraction large et génération du dossier stratégique complet N7."""
     retrieved_docs = engine.search(
         query="objet prestation besoin profil compétences pénalités propriété intellectuelle prix livrables planning",
-        top_k=20,
+        top_k=25,
     )
     if not retrieved_docs:
         raise HTTPException(
@@ -104,3 +118,4 @@ def generate_full_dossier():
         )
 
     return synthesizer.generate_dossier(retrieved_docs)
+    
