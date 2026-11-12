@@ -79,7 +79,9 @@ async def upload_pdf(file: Annotated[UploadFile, File(...)]):
             total_requirements=len(docs),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur d'indexation: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Erreur d'indexation: {e!s}"
+        ) from e
 
 
 @app.post("/ingest-past-studies")
@@ -120,4 +122,6 @@ def generate_n7_dossier() -> N7BiddingDossier:
     try:
         return synthesizer.generate_dossier(docs)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur génération dossier: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Erreur génération dossier: {e!s}"
+        ) from e

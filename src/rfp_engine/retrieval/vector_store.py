@@ -122,7 +122,6 @@ class HybridSearchEngine:
         candidate_k = max(top_k * 3, 15)
         query_vector = self.encoder.encode(query).tolist()
 
-        
         # 1. Tier 1A : Recherche Dense (Qdrant)
         dense_hits: list[dict[str, Any]] = []
         try:
