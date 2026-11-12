@@ -1,11 +1,13 @@
-from typing import List, Dict, Any
+from typing import Any
 
 
-def compute_hit_rate(retrieved_docs: List[Dict[str, Any]], expected_keywords: List[str]) -> float:
+def compute_hit_rate(
+    retrieved_docs: list[dict[str, Any]], expected_keywords: list[str]
+) -> float:
     """Calcule si au moins un document extrait contient l'un des mots-clés attendus."""
     if not retrieved_docs or not expected_keywords:
         return 0.0
-    
+
     combined_text = " ".join([doc.get("text", "").lower() for doc in retrieved_docs])
     for kw in expected_keywords:
         if kw.lower() in combined_text:
@@ -13,7 +15,9 @@ def compute_hit_rate(retrieved_docs: List[Dict[str, Any]], expected_keywords: Li
     return 0.0
 
 
-def compute_mrr(retrieved_docs: List[Dict[str, Any]], expected_keywords: List[str]) -> float:
+def compute_mrr(
+    retrieved_docs: list[dict[str, Any]], expected_keywords: list[str]
+) -> float:
     """Calcule le Mean Reciprocal Rank (MRR) de la première occurrence d'un document pertinent."""
     if not retrieved_docs or not expected_keywords:
         return 0.0
@@ -25,7 +29,7 @@ def compute_mrr(retrieved_docs: List[Dict[str, Any]], expected_keywords: List[st
     return 0.0
 
 
-def compute_keyword_coverage(answer: str, expected_keywords: List[str]) -> float:
+def compute_keyword_coverage(answer: str, expected_keywords: list[str]) -> float:
     """Calcule le taux de couverture des mots-clés attendus dans la réponse générée."""
     if not answer or not expected_keywords:
         return 0.0

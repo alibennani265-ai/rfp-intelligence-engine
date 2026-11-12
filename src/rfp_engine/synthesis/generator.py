@@ -1,9 +1,11 @@
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any
+
 from litellm import completion
 from loguru import logger
 from pydantic import BaseModel
+
 from rfp_engine.domain.enseeiht_context import CNJE_RULES, ENSEEIHT_DEPARTMENTS
 
 
@@ -17,7 +19,7 @@ class ENSEEIHTStaffing(BaseModel):
     filiere: str  # "SN", "3EA" ou "MFEE"
     niveau: str
     nombre_etudiants: int
-    competences_cles: List[str]
+    competences_cles: list[str]
     role_dans_projet: str
 
 
@@ -42,23 +44,20 @@ class N7BiddingDossier(BaseModel):
     score_opportunite: int
     synthese_executive: str
     argumentaire_commercial_n7: str
-    conformite_cnje: List[CNJECheckItem]
-    staffing_enseeiht: List[ENSEEIHTStaffing]
-    ventilation_financiere: List[PhasePricing]
+    conformite_cnje: list[CNJECheckItem]
+    staffing_enseeiht: list[ENSEEIHTStaffing]
+    ventilation_financiere: list[PhasePricing]
     total_jeh_estime: int
-    matrice_risques: List[RiskItem]
-    clauses_a_renegocier: List[str]
-    recommandations_commerciales: List[str]
+    matrice_risques: list[RiskItem]
+    clauses_a_renegocier: list[str]
+    recommandations_commerciales: list[str]
 
 
 class RFPSynthesizer:
-
     def __init__(self, model_name: str = "ollama/llama3.1:8b"):
         self.model_name = model_name
 
-    def answer_question(
-        self, query: str, requirements: List[Dict[str, Any]]
-    ) -> str:
+    def answer_question(self, query: str, requirements: list[dict[str, Any]]) -> str:
         """Génère une réponse concise et factuelle à partir des extraits récupérés."""
         context_text = "\n\n".join(
             [
@@ -86,13 +85,11 @@ INSTRUCTIONS :
                 temperature=0.1,
             )
             return response.choices[0].message.content
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Erreur Chat LLM: {e}")
             return "Erreur lors de la réponse du modèle. Vérifiez qu'Ollama est actif."
 
-    def generate_dossier(
-        self, requirements: List[Dict[str, Any]]
-    ) -> N7BiddingDossier:
+    def generate_dossier(self, requirements: list[dict[str, Any]]) -> N7BiddingDossier:
         """Génère un dossier d'avant-vente éclairé par le référentiel ENSEEIHT et les règles CNJE."""
         context_text = "\n\n".join(
             [
@@ -153,7 +150,9 @@ Format JSON attendu :
   "recommandations_commerciales": ["..."]
 }}
 """
-        logger.info(f"Appel du LLM ({self.model_name}) avec contexte domaine ENSEEIHT...")
+        logger.info(
+            f"Appel du LLM ({self.model_name}) avec contexte domaine ENSEEIHT..."
+        )
         try:
             response = completion(
                 model=self.model_name,
@@ -166,4 +165,4 @@ Format JSON attendu :
             return N7BiddingDossier.model_validate_json(raw_json)
         except Exception as e:
             logger.error(f"Erreur de génération JSON: {e}")
-            raise e
+            raise

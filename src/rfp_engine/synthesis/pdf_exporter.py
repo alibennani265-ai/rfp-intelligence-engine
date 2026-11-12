@@ -1,9 +1,9 @@
 from fpdf import FPDF
+
 from rfp_engine.synthesis.generator import N7BiddingDossier
 
 
 class N7PDFReport(FPDF):
-
     def header(self):
         self.set_font("Helvetica", "B", 8)
         self.set_text_color(180, 15, 30)  # Rouge N7
@@ -74,9 +74,7 @@ def generate_n7_pdf(dossier: N7BiddingDossier) -> bytes:
     # Titre du Rapport
     pdf.set_font("Helvetica", "B", 16)
     pdf.set_text_color(20, 30, 55)
-    pdf.multi_cell(
-        0, 7, _sanitize(f"Dossier d'Avant-Vente : {dossier.titre_marche}")
-    )
+    pdf.multi_cell(0, 7, _sanitize(f"Dossier d'Avant-Vente : {dossier.titre_marche}"))
     pdf.ln(2)
 
     # Cartouche Métriques
@@ -116,9 +114,7 @@ def generate_n7_pdf(dossier: N7BiddingDossier) -> bytes:
     # Section 1 : Synthèse Exécutive
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(180, 15, 30)
-    pdf.cell(
-        0, 7, _sanitize("1. Synthese Executive"), new_x="LMARGIN", new_y="NEXT"
-    )
+    pdf.cell(0, 7, _sanitize("1. Synthese Executive"), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(40, 40, 40)
     pdf.multi_cell(0, 5, _sanitize(dossier.synthese_executive))
@@ -189,9 +185,7 @@ def generate_n7_pdf(dossier: N7BiddingDossier) -> bytes:
         pdf.multi_cell(
             0,
             5,
-            _sanitize(
-                f"   Competences : {comps}\n   Role : {stf.role_dans_projet}"
-            ),
+            _sanitize(f"   Competences : {comps}\n   Role : {stf.role_dans_projet}"),
         )
         pdf.ln(1)
     pdf.ln(3)

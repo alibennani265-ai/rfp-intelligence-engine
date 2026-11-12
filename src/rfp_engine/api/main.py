@@ -1,27 +1,31 @@
+import asyncio
 import os
-from typing import Any, Dict, List
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from pathlib import Path
+from typing import Annotated, Any
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
-from rfp_engine.config import settings
+
 from rfp_engine.ingestion.parser import RFPParser
 from rfp_engine.ingestion.study_ingestor import N7PastStudyIngestor
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
 from rfp_engine.synthesis.generator import N7BiddingDossier, RFPSynthesizer
 
 app = FastAPI(
-    title="N7 Consulting — Strategic Bidding Engine",
-    description="Assistant de Décision et d'Avant-Vente RAG pour N7 Consulting (ENSEEIHT)",
-    version="0.6.0",
+    title="N7 Strategic Bidding Engine",
+    description="RAG Hybride & Copilot d'Avant-Vente pour N7 Consulting (ENSEEIHT)",
+    version="1.0.0",
 )
 
-engine = HybridSearchEngine()
-synthesizer = RFPSynthesizer(model_name="ollama/llama3.1:8b")
+search_engine = HybridSearchEngine(collection_name="rfp_requirements")
+synthesizer = RFPSynthesizer()
 
 
 class IngestResponse(BaseModel):
-    message: str
+    status: str
     filename: str
     total_requirements: int
+    message: str = "Document indexé avec succès."
 
 
 class ChatRequest(BaseModel):
@@ -32,90 +36,88 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     question: str
     answer: str
-    sources: List[Dict[str, Any]]
+    sources: list[dict[str, Any]]
 
 
 @app.get("/health")
-def health_check():
+def health_check() -> dict[str, str]:
     return {"status": "ok", "app": "N7 Strategic Bidding Engine"}
 
 
 @app.post("/upload", response_model=IngestResponse)
-async def upload_pdf(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
+async def upload_pdf(file: Annotated[UploadFile, File(...)]):
+    if not file.filename or not file.filename.endswith(".pdf"):
         raise HTTPException(
-            status_code=400, detail="Seuls les fichiers PDF sont acceptés."
+            status_code=400,
+            detail="Seuls les fichiers PDF sont acceptés.",
         )
 
     os.makedirs("data", exist_ok=True)
     save_path = os.path.join("data", file.filename)
 
-    with open(save_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    content = await file.read()
+    await asyncio.to_thread(Path(save_path).write_bytes, content)
 
     try:
-        global engine
-        engine = HybridSearchEngine()
-
         parser = RFPParser(save_path)
         requirements = parser.parse()
+
         docs = [
             {
-                "id": req.requirement_id,
+                "id": getattr(req, "id", f"req_{idx}"),
                 "section": req.section,
                 "text": req.text,
                 "metadata": req.metadata,
             }
-            for req in requirements
+            for idx, req in enumerate(requirements)
         ]
-        engine.index_documents(docs)
+        search_engine.index_documents(docs)
+
         return IngestResponse(
-            message="Nouveau document indexé avec succès.",
+            status="ok",
             filename=file.filename,
             total_requirements=len(docs),
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Erreur d'indexation: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erreur d'indexation: {e!s}") from e
 
 
 @app.post("/ingest-past-studies")
-def ingest_past_studies():
-    """Ingère et vectorise tous les fichiers d'anciennes études placés dans data/past_studies."""
-    ingestor = N7PastStudyIngestor()
-    total_chunks = ingestor.ingest_all("data/past_studies")
+def ingest_past_studies() -> dict[str, str]:
+    ingestor = N7PastStudyIngestor(
+        collection_name=search_engine.collection_name,
+        engine=search_engine,
+    )
+    count = ingestor.ingest_all("data/past_studies")
     return {
         "status": "ok",
-        "message": f"{total_chunks} blocs d'anciennes études N7 indexés dans Qdrant.",
+        "message": f"{count} blocs d'anciennes études N7 indexés dans Qdrant.",
     }
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat_n7(body: ChatRequest):
-    retrieved_docs = engine.search(query=body.question, top_k=body.top_k)
-    if not retrieved_docs:
-        raise HTTPException(
-            status_code=404, detail="Index vide. Veuillez uploader un PDF."
-        )
-
-    answer = synthesizer.answer_question(body.question, retrieved_docs)
+def chat_with_rfp(request: ChatRequest) -> ChatResponse:
+    docs = search_engine.search(query=request.question, top_k=request.top_k)
+    answer = synthesizer.answer_question(request.question, docs)
     return ChatResponse(
-        question=body.question, answer=answer, sources=retrieved_docs
+        question=request.question,
+        answer=answer,
+        sources=docs,
     )
 
 
 @app.get("/dossier-n7", response_model=N7BiddingDossier)
-def generate_full_dossier():
-    retrieved_docs = engine.search(
-        query="objet prestation besoin profil compétences pénalités propriété intellectuelle prix livrables planning",
+def generate_n7_dossier() -> N7BiddingDossier:
+    docs = search_engine.search(
+        query="cahier des charges objectifs techniques budget délais contraintes",
         top_k=25,
     )
-    if not retrieved_docs:
+    if not docs:
         raise HTTPException(
-            status_code=404, detail="Index vide. Veuillez uploader un PDF."
+            status_code=400,
+            detail="Aucun document indexé. Veuillez d'abord uploader un CCTP/CCAP.",
         )
-
-    return synthesizer.generate_dossier(retrieved_docs)
-    
+    try:
+        return synthesizer.generate_dossier(docs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur génération dossier: {e!s}") from e
