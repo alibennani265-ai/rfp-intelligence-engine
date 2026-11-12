@@ -1,15 +1,16 @@
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
+
+from loguru import logger
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
-from loguru import logger
 
 
 class RFPRequirement(BaseModel):
     requirement_id: str
     section: str
     text: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RFPParser:
@@ -18,10 +19,10 @@ class RFPParser:
         if not self.file_path.exists():
             raise FileNotFoundError(f"Fichier non trouvé : {file_path}")
 
-    def parse(self) -> List[RFPRequirement]:
+    def parse(self) -> list[RFPRequirement]:
         logger.info(f"Début du parsing de {self.file_path.name}")
         reader = PdfReader(self.file_path)
-        requirements: List[RFPRequirement] = []
+        requirements: list[RFPRequirement] = []
 
         for page_idx, page in enumerate(reader.pages):
             text = page.extract_text()

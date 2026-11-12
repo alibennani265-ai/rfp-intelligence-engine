@@ -1,6 +1,8 @@
 import json
-from typing import Any, Dict, List
+from typing import Any
+
 from loguru import logger
+
 from rfp_engine.evaluation.metrics import (
     compute_hit_rate,
     compute_keyword_coverage,
@@ -12,15 +14,12 @@ from rfp_engine.synthesis.generator import RFPSynthesizer
 
 
 class RAGEvaluator:
-
     def __init__(self, dataset_path: str = "data/eval_dataset.json"):
         self.dataset_path = dataset_path
 
         self.engine = HybridSearchEngine(collection_name="n7_past_studies")
 
-        logger.info(
-            "Vérification et ingestion du corpus d'études N7 dans Qdrant..."
-        )
+        logger.info("Vérification et ingestion du corpus d'études N7 dans Qdrant...")
         ingestor = N7PastStudyIngestor(
             collection_name="n7_past_studies", engine=self.engine
         )
@@ -28,11 +27,11 @@ class RAGEvaluator:
 
         self.synthesizer = RFPSynthesizer()
 
-    def load_dataset(self) -> List[Dict[str, Any]]:
+    def load_dataset(self) -> list[dict[str, Any]]:
         with open(self.dataset_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    def run_evaluation(self, top_k: int = 5) -> Dict[str, float]:
+    def run_evaluation(self, top_k: int = 5) -> dict[str, float]:
         dataset = self.load_dataset()
         total_q = len(dataset)
 
@@ -40,9 +39,7 @@ class RAGEvaluator:
         mrrs = []
         coverages = []
 
-        logger.info(
-            f"Démarrage de l'évaluation RAG sur {total_q} requêtes de test..."
-        )
+        logger.info(f"Démarrage de l'évaluation RAG sur {total_q} requêtes de test...")
 
         for item in dataset:
             query = item["query"]
@@ -50,9 +47,7 @@ class RAGEvaluator:
 
             # 1. Évaluation Vector Search / Retrieval
             retrieved = self.engine.search(query=query, top_k=top_k)
-            logger.info(
-                f"Query: '{query}' -> {len(retrieved)} extraits trouvés."
-            )
+            logger.info(f"Query: '{query}' -> {len(retrieved)} extraits trouvés.")
 
             hr = compute_hit_rate(retrieved, keywords)
             mrr = compute_mrr(retrieved, keywords)

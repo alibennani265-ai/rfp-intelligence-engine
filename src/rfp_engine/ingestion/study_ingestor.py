@@ -1,17 +1,17 @@
 import os
 from glob import glob
-from typing import Any, Dict, List, Optional
+
 from loguru import logger
 from pypdf import PdfReader
+
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
 
 
 class N7PastStudyIngestor:
-
     def __init__(
         self,
         collection_name: str = "n7_past_studies",
-        engine: Optional[HybridSearchEngine] = None,
+        engine: HybridSearchEngine | None = None,
     ):
         self.collection_name = collection_name
         self.engine = (
@@ -25,9 +25,7 @@ class N7PastStudyIngestor:
         md_files = glob(os.path.join(folder_path, "*.md"))
 
         if not pdf_files and not md_files:
-            logger.warning(
-                f"Aucun fichier PDF ou Markdown trouvé dans {folder_path}"
-            )
+            logger.warning(f"Aucun fichier PDF ou Markdown trouvé dans {folder_path}")
             return 0
 
         documents = []
@@ -40,9 +38,7 @@ class N7PastStudyIngestor:
                     full_text = f.read()
 
                 chunks = [
-                    p.strip()
-                    for p in full_text.split("\n\n")
-                    if len(p.strip()) > 40
+                    p.strip() for p in full_text.split("\n\n") if len(p.strip()) > 40
                 ]
                 for i, chunk in enumerate(chunks):
                     documents.append(
@@ -59,7 +55,7 @@ class N7PastStudyIngestor:
                 logger.info(
                     f"Extraction Markdown réussie pour '{filename}' : {len(chunks)} blocs."
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(
                     f"Erreur d'extraction sur le fichier Markdown '{filename}': {e}"
                 )
@@ -76,9 +72,7 @@ class N7PastStudyIngestor:
                         full_text += f"\n--- Page {idx + 1} ---\n" + txt
 
                 chunks = [
-                    p.strip()
-                    for p in full_text.split("\n\n")
-                    if len(p.strip()) > 80
+                    p.strip() for p in full_text.split("\n\n") if len(p.strip()) > 80
                 ]
                 for i, chunk in enumerate(chunks):
                     documents.append(
@@ -95,10 +89,8 @@ class N7PastStudyIngestor:
                 logger.info(
                     f"Extraction PDF réussie pour '{filename}' : {len(chunks)} blocs."
                 )
-            except Exception as e:
-                logger.error(
-                    f"Erreur d'extraction sur le PDF '{filename}': {e}"
-                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Erreur d'extraction sur le PDF '{filename}': {e}")
 
         if documents:
             self.engine.index_documents(documents)
