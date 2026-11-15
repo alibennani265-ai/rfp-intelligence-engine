@@ -1,4 +1,5 @@
 import os
+import uuid
 from typing import Any
 
 from loguru import logger
@@ -9,7 +10,7 @@ from sentence_transformers import CrossEncoder, SentenceTransformer
 
 
 class HybridSearchEngine:
-    """Moteur de recherche hybride 2-Tier : Dense (BGE-M3) + Lexical (BM25) avec RRF et Cross-Encoder."""
+    _shared_client: QdrantClient | None = None
 
     def __init__(
         self,
@@ -22,20 +23,15 @@ class HybridSearchEngine:
         self.db_path = "data/qdrant_db"
         os.makedirs(self.db_path, exist_ok=True)
 
-        self.client = QdrantClient(path=self.db_path)
-        logger.info(
-            f"Chargement du modèle d'embedding '{embedding_model}' ({self.collection_name})..."
-        )
+        if HybridSearchEngine._shared_client is None:
+            HybridSearchEngine._shared_client = QdrantClient(path=self.db_path)
+        self.client = HybridSearchEngine._shared_client
+
         self.encoder = SentenceTransformer(embedding_model)
-
-        if hasattr(self.encoder, "get_embedding_dimension"):
-            self.vector_size = self.encoder.get_embedding_dimension() or 1024
-        else:
-            self.vector_size = self.encoder.get_sentence_embedding_dimension() or 1024
-
+        self.encoder.max_seq_length = 512
+        self.vector_size: int = self.encoder.get_sentence_embedding_dimension() or 1024
         self.use_reranker = use_reranker
         self.reranker = CrossEncoder(reranker_model) if use_reranker else None
-
         self.bm25: BM25Okapi | None = None
         self.documents: list[dict[str, Any]] = []
 
@@ -45,7 +41,6 @@ class HybridSearchEngine:
     def _ensure_collection_exists(self) -> None:
         collections = [col.name for col in self.client.get_collections().collections]
         if self.collection_name not in collections:
-            logger.info(f"Création de la collection Qdrant : '{self.collection_name}'")
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
@@ -53,57 +48,57 @@ class HybridSearchEngine:
                 ),
             )
 
+    def reset_collection(self) -> None:
+        collections = [col.name for col in self.client.get_collections().collections]
+        if self.collection_name in collections:
+            self.client.delete_collection(collection_name=self.collection_name)
+        self._ensure_collection_exists()
+        self.documents = []
+        self.bm25 = None
+
     def _hydrate_lexical_index_from_qdrant(self) -> None:
-        """Reconstruit l'index BM25 en mémoire à partir des payloads persistés dans Qdrant."""
-        try:
-            records, _ = self.client.scroll(
-                collection_name=self.collection_name,
-                limit=1000,
-                with_payload=True,
-                with_vectors=False,
-            )
-            if records:
-                self.documents = [
-                    {
-                        "id": (rec.payload or {}).get("doc_id", str(rec.id)),
-                        "section": (rec.payload or {}).get("section", "N/A"),
-                        "text": (rec.payload or {}).get("text", ""),
-                        "metadata": (rec.payload or {}).get("metadata", {}),
-                    }
-                    for rec in records
-                    if (rec.payload or {}).get("text")
-                ]
-                if self.documents:
-                    corpus = [doc["text"].lower().split() for doc in self.documents]
-                    self.bm25 = BM25Okapi(corpus)
-                    logger.info(
-                        f"Index lexical BM25 restauré ({len(self.documents)} chunks)."
-                    )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                f"Impossible de restaurer l'index BM25 depuis Qdrant : {exc}"
+        records, _ = self.client.scroll(
+            collection_name=self.collection_name,
+            limit=2000,
+            with_payload=True,
+            with_vectors=False,
+        )
+        self.documents = [
+            {
+                "id": (rec.payload or {}).get("doc_id", str(rec.id)),
+                "section": (rec.payload or {}).get("section", "N/A"),
+                "text": (rec.payload or {}).get("text", ""),
+                "metadata": (rec.payload or {}).get("metadata", {}),
+            }
+            for rec in records
+            if (rec.payload or {}).get("text")
+        ]
+        if self.documents:
+            self.bm25 = BM25Okapi(
+                [doc["text"].lower().split() for doc in self.documents]
             )
 
     def index_documents(self, docs: list[dict[str, Any]]) -> None:
         if not docs:
-            logger.warning("Aucun document à indexer.")
             return
-
-        self.documents = docs
-        corpus = [doc["text"].lower().split() for doc in docs]
-        self.bm25 = BM25Okapi(corpus)
-
-        texts = [doc["text"] for doc in docs]
+        logger.info(f"Encodage de {len(docs)} blocs pour '{self.collection_name}'...")
         embeddings = self.encoder.encode(
-            texts, show_progress_bar=False, convert_to_numpy=True
+            [doc["text"] for doc in docs],
+            batch_size=16,
+            show_progress_bar=False,
+            convert_to_numpy=True,
         )
-
         points = [
             PointStruct(
-                id=idx,
+                id=str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_DNS,
+                        f"{self.collection_name}_{doc.get('id', idx)}_{doc['text'][:80]}",
+                    )
+                ),
                 vector=vector.tolist(),
                 payload={
-                    "doc_id": doc.get("id", f"doc_{idx}"),
+                    "doc_id": str(doc.get("id", f"doc_{idx}")),
                     "section": doc.get("section", "N/A"),
                     "text": doc["text"],
                     "metadata": doc.get("metadata", {}),
@@ -111,99 +106,65 @@ class HybridSearchEngine:
             )
             for idx, (doc, vector) in enumerate(zip(docs, embeddings, strict=True))
         ]
-
         self.client.upsert(collection_name=self.collection_name, points=points)
-        logger.info(
-            f"{len(docs)} chunks indexés dans Qdrant ('{self.collection_name}')."
-        )
+        self._hydrate_lexical_index_from_qdrant()
 
     def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """Exécute une recherche hybride (Dense + BM25 via RRF) suivie d'un Cross-Encoder Reranking."""
+        if not self.documents:
+            return []
         candidate_k = max(top_k * 3, 15)
         query_vector = self.encoder.encode(query).tolist()
 
-        # 1. Tier 1A : Recherche Dense (Qdrant)
-        dense_hits: list[dict[str, Any]] = []
-        try:
-            response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_vector,
-                limit=candidate_k,
-                with_payload=True,
-            )
-            raw_points = response.points if hasattr(response, "points") else response
+        response = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            limit=candidate_k,
+            with_payload=True,
+        )
+        raw_points = response.points if hasattr(response, "points") else response
+        dense_hits = [
+            {
+                "id": (res.payload or {}).get("doc_id"),
+                "section": (res.payload or {}).get("section"),
+                "text": (res.payload or {}).get("text"),
+                "score": float(getattr(res, "score", 0.0)),
+                "metadata": (res.payload or {}).get("metadata", {}),
+            }
+            for res in raw_points
+            if (res.payload or {}).get("text")
+        ]
 
-            for res in raw_points:
-                payload = getattr(res, "payload", {}) or {}
-                if payload.get("text"):
-                    dense_hits.append(
-                        {
-                            "id": payload.get("doc_id"),
-                            "section": payload.get("section"),
-                            "text": payload.get("text"),
-                            "score": float(getattr(res, "score", 0.0)),
-                            "metadata": payload.get("metadata", {}),
-                        }
-                    )
-        except Exception as exc:  # noqa: BLE001
-            logger.error(f"Erreur recherche vectorielle Qdrant : {exc}")
-
-        # 2. Tier 1B : Recherche Lexicale (BM25)
         lexical_hits: list[dict[str, Any]] = []
-        if self.bm25 and self.documents:
-            tokenized_query = query.lower().split()
-            bm25_scores = self.bm25.get_scores(tokenized_query)
-            top_indices = sorted(
-                range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
-            )[:candidate_k]
-            for idx in top_indices:
-                if bm25_scores[idx] > 0:
+        if self.bm25:
+            scores = self.bm25.get_scores(query.lower().split())
+            for idx in sorted(
+                range(len(scores)), key=lambda i: scores[i], reverse=True
+            )[:candidate_k]:
+                if scores[idx] > 0:
                     doc = self.documents[idx]
-                    lexical_hits.append(
-                        {
-                            "id": doc.get("id"),
-                            "section": doc.get("section"),
-                            "text": doc.get("text"),
-                            "score": float(bm25_scores[idx]),
-                            "metadata": doc.get("metadata", {}),
-                        }
-                    )
+                    lexical_hits.append({**doc, "score": float(scores[idx])})
 
-        # 3. Fusion Reciprocal Rank Fusion (RRF)
         rrf_scores: dict[str, float] = {}
-        doc_registry: dict[str, dict[str, Any]] = {}
-        rrf_k = 60
-
+        registry: dict[str, dict[str, Any]] = {}
         for rank, item in enumerate(dense_hits, start=1):
-            doc_key = str(item["id"] or item["text"][:60])
-            doc_registry[doc_key] = item
-            rrf_scores[doc_key] = rrf_scores.get(doc_key, 0.0) + (1.0 / (rrf_k + rank))
-
+            k = str(item["id"] or item["text"][:60])
+            registry[k] = item
+            rrf_scores[k] = rrf_scores.get(k, 0.0) + 1.0 / (60 + rank)
         for rank, item in enumerate(lexical_hits, start=1):
-            doc_key = str(item["id"] or item["text"][:60])
-            doc_registry[doc_key] = item
-            rrf_scores[doc_key] = rrf_scores.get(doc_key, 0.0) + (1.0 / (rrf_k + rank))
+            k = str(item["id"] or item["text"][:60])
+            registry[k] = item
+            rrf_scores[k] = rrf_scores.get(k, 0.0) + 1.0 / (60 + rank)
 
-        fused_candidates = [
-            {**doc_registry[key], "rrf_score": score}
-            for key, score in sorted(
-                rrf_scores.items(), key=lambda x: x[1], reverse=True
-            )
+        fused = [
+            {**registry[k], "rrf_score": s}
+            for k, s in sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
         ][:candidate_k]
-
-        # 4. Tier 2 : Cross-Encoder Reranking
-        if self.use_reranker and self.reranker and fused_candidates:
-            pairs = [(query, cand["text"]) for cand in fused_candidates]
-            ce_scores = self.reranker.predict(pairs)
-            for cand, ce_score in zip(fused_candidates, ce_scores, strict=True):
-                cand["score"] = float(ce_score)
-            fused_candidates.sort(key=lambda x: x["score"], reverse=True)
-
-        return fused_candidates[:top_k]
+        if self.use_reranker and self.reranker and fused:
+            ce_scores = self.reranker.predict([(query, c["text"]) for c in fused])
+            for c, s in zip(fused, ce_scores, strict=True):
+                c["score"] = float(s)
+            fused.sort(key=lambda x: x["score"], reverse=True)
+        return fused[:top_k]
 
     def close(self) -> None:
-        try:
-            if hasattr(self.client, "close"):
-                self.client.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Fermeture client Qdrant : {exc}")
+        pass

@@ -7,7 +7,7 @@ ENSEEIHT_DEPARTMENTS = {
             "Intelligence Artificielle & Machine Learning",
             "Data Science & Big Data",
             "Développement Full-Stack (Python, FastAPI, React, Node.js)",
-            "Cloud, DevOps & Substrate Infrastructure",
+            "Cloud, DevOps & Infrastructure",
             "Cybersécurité & Réseaux",
             "Calcul Bas Niveau & Calcul Intensif (C/C++, OCaml, Ada, Système)",
         ],
@@ -31,14 +31,15 @@ ENSEEIHT_DEPARTMENTS = {
             "Hydraulique & Mécanique des structures",
             "Ingénierie Environnementale & Transition Énergétique",
         ],
-        "profils_typique": "Consultant Simulation Numerique, Ingénieur Thermique & Fluides",
+        "profils_typique": "Consultant Simulation Numérique, Ingénieur Thermique & Fluides",
     },
 }
 
 CNJE_RULES = """
-CADRE RÉGLEMENTAIRE CONFE'DE'RATION NATIONALE DES JUNIOR-ENTREPRISES (CNJE) :
-1. VALEUR PÉDAGOGIQUE OBLIGATOIRE : Toute étude confiée à N7 Consulting doit comporter une part d'analyse, de conception ou de développement d'ingénierie correspondant directement au cursus de l'ENSEEIHT.
-2. INTERDICTION DE RÉGIE PURE : N7 Consulting vend des prestations au FORFAIT (engagements sur livrables), jamais de mise à disposition d'étudiants en régie horaire dans les locaux clients.
-3. PAS DE MAINTENANCE 24/7 POST-DIPLÔME : Pas d'astreinte ni de contrat de support pluriannuel post-livraison.
-4. UNITÉ DE FACTURATION : Jours-Étude Homme (JEH), tarif compris entre 80€ et 450€ HT / JEH selon la technicité.
+CADRE LÉGAL ET RÉGLEMENTAIRE CNJE (LIGNES ROUGES) :
+1. PLUS-VALUE PÉDAGOGIQUE (PVP) OBLIGATOIRE : L'étude doit prolonger les enseignements sanctionnés par un examen à l'ENSEEIHT (interdiction des tâches sans valeur ajoutée intellectuelle, saisie brute ou licences étudiantes).
+2. INTERDICTION DE RÉGIE & PRÊT DE MAIN-D'ŒUVRE : Engagement au forfait sur livrables uniquement. Interdiction de placer un étudiant en régie chez le client, sous subordination hiérarchique ou avec pointage de feuilles de temps. Interdiction de sous-traiter à un tiers externe.
+3. OBLIGATION DE MOYENS & GARANTIE LIMITÉE : Obligation de moyens uniquement (jamais de résultat), pas d'astreinte 24/7 ni de maintenance pluriannuelle. Garantie de conformité limitée à 1 mois (rapport) ou 3 mois (livrable technique/logiciel) après PVRF.
+4. PROPRIÉTÉ INTELLECTUELLE & JURIDICTION : Cession des droits patrimoniaux uniquement après paiement intégral de toutes les factures. Juridiction compétente : Tribunal judiciaire du siège de la J.E. (jamais Tribunal de commerce).
+5. UNITÉ DE FACTURATION (JEH) : Nombre entier indivisible, facturé entre 80 € HT et 450 € HT / JEH (moyenne N7 : 442 € HT), soumis à TVA 20 %.
 """
