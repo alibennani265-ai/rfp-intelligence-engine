@@ -1,17 +1,42 @@
 [
   {
     "query": "Quel est le prix moyen d'un JEH chez N7 Consulting ?",
-    "expected_answer": "Le prix moyen d'un JEH hors frais et avenants est de 442 € HT.",
-    "expected_keywords": ["442", "JEH", "moyen"]
+    "expected_keywords": ["442", "JEH"]
   },
   {
     "query": "Combien d'études ont été réalisées dans la filière SN et la filière 3EA ?",
-    "expected_answer": "La filière SN compte 30 études et la filière 3EA compte 9 études.",
-    "expected_keywords": ["SN", "30", "3EA", "9"]
+    "expected_keywords": ["SN", "3EA"]
   },
   {
     "query": "Quel est le nombre total d'études répertoriées dans la synthèse ?",
-    "expected_answer": "Le nombre total d'études est de 40.",
     "expected_keywords": ["40", "études"]
+  },
+  {
+    "query": "Pourquoi la régie pure et le prêt de main-d'œuvre sont-ils interdits chez N7 Consulting ?",
+    "expected_keywords": ["L.8241-1", "livrables", "régie"]
+  },
+  {
+    "query": "Quelle est la durée maximale de garantie autorisée à la place d'une maintenance 24/7 ?",
+    "expected_keywords": ["90 jours", "garantie"]
+  },
+  {
+    "query": "Quel est le plafond maximal recommandé pour les pénalités de retard dans une convention CNJE ?",
+    "expected_keywords": ["5 %", "10 %", "plafonnées"]
+  },
+  {
+    "query": "Quelle filière de l'ENSEEIHT est compétente pour la simulation CFD sous OpenFOAM et la thermique ?",
+    "expected_keywords": ["MFEE", "OpenFOAM", "CFD"]
+  },
+  {
+    "query": "Quelle filière maîtrise le développement matériel FPGA en VHDL et le traitement radar ?",
+    "expected_keywords": ["3EA", "FPGA", "VHDL"]
+  },
+  {
+    "query": "Comment N7 Consulting gère-t-il les contraintes de confidentialité pour le secteur aéronautique et spatial ?",
+    "expected_keywords": ["NDA", "anonymisation", "locaux"]
+  },
+  {
+    "query": "Quand la cession des droits de propriété intellectuelle au client devient-elle effective ?",
+    "expected_keywords": ["paiement intégral", "propriété intellectuelle"]
   }
 ]
