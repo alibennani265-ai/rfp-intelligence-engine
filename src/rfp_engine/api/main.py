@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from loguru import logger
 from pydantic import BaseModel
 
 from rfp_engine.ingestion.parser import RFPParser
@@ -11,13 +12,15 @@ from rfp_engine.ingestion.study_ingestor import N7PastStudyIngestor
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
 from rfp_engine.synthesis.generator import N7BiddingDossier, RFPSynthesizer
 
-app = FastAPI(
-    title="N7 Strategic Bidding Engine",
-    description="RAG Hybride & Copilot d'Avant-Vente pour N7 Consulting (ENSEEIHT)",
-    version="1.0.0",
-)
+app = FastAPI(title="N7 Strategic Bidding Engine", version="1.3.0")
 
-search_engine = HybridSearchEngine(collection_name="rfp_requirements")
+rfp_search_engine = HybridSearchEngine(collection_name="rfp_requirements")
+knowledge_engine = HybridSearchEngine(collection_name="n7_past_studies")
+if not knowledge_engine.documents and os.path.exists("data/past_studies"):
+    N7PastStudyIngestor(
+        collection_name="n7_past_studies", engine=knowledge_engine
+    ).ingest_all("data/past_studies")
+
 synthesizer = RFPSynthesizer()
 
 
@@ -30,7 +33,7 @@ class IngestResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
-    top_k: int = 5
+    top_k: int = 6
 
 
 class ChatResponse(BaseModel):
@@ -40,88 +43,119 @@ class ChatResponse(BaseModel):
 
 
 @app.get("/health")
-def health_check() -> dict[str, str]:
-    return {"status": "ok", "app": "N7 Strategic Bidding Engine"}
+def health_check() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "rfp_chunks": len(rfp_search_engine.documents),
+        "knowledge_chunks": len(knowledge_engine.documents),
+    }
 
 
 @app.post("/upload", response_model=IngestResponse)
 async def upload_pdf(file: Annotated[UploadFile, File(...)]):
     if not file.filename or not file.filename.endswith(".pdf"):
         raise HTTPException(
-            status_code=400,
-            detail="Seuls les fichiers PDF sont acceptés.",
+            status_code=400, detail="Seuls les fichiers PDF sont acceptés."
         )
-
     os.makedirs("data", exist_ok=True)
     save_path = os.path.join("data", file.filename)
-
     content = await file.read()
     await asyncio.to_thread(Path(save_path).write_bytes, content)
 
-    try:
-        parser = RFPParser(save_path)
-        requirements = parser.parse()
-
-        docs = [
-            {
-                "id": getattr(req, "id", f"req_{idx}"),
-                "section": req.section,
-                "text": req.text,
-                "metadata": req.metadata,
-            }
-            for idx, req in enumerate(requirements)
-        ]
-        search_engine.index_documents(docs)
-
-        return IngestResponse(
-            status="ok",
-            filename=file.filename,
-            total_requirements=len(docs),
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Erreur d'indexation: {e!s}"
-        ) from e
+    rfp_search_engine.reset_collection()
+    requirements = RFPParser(save_path).parse()
+    docs = [
+        {
+            "id": r.requirement_id,
+            "section": f"[CCTP CLIENT] {r.section}",
+            "text": r.text,
+            "metadata": r.metadata,
+        }
+        for r in requirements
+    ]
+    rfp_search_engine.index_documents(docs)
+    return IngestResponse(
+        status="ok", filename=file.filename, total_requirements=len(docs)
+    )
 
 
 @app.post("/ingest-past-studies")
-def ingest_past_studies() -> dict[str, str]:
-    ingestor = N7PastStudyIngestor(
-        collection_name=search_engine.collection_name,
-        engine=search_engine,
-    )
-    count = ingestor.ingest_all("data/past_studies")
+def ingest_past_studies() -> dict[str, Any]:
+    knowledge_engine.reset_collection()
+    count = N7PastStudyIngestor(
+        collection_name="n7_past_studies", engine=knowledge_engine
+    ).ingest_all("data/past_studies")
     return {
         "status": "ok",
-        "message": f"{count} blocs d'anciennes études N7 indexés dans Qdrant.",
+        "total_chunks": count,
+        "message": f"{count} blocs CNJE & N7 indexés.",
     }
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat_with_rfp(request: ChatRequest) -> ChatResponse:
-    docs = search_engine.search(query=request.question, top_k=request.top_k)
-    answer = synthesizer.answer_question(request.question, docs)
-    return ChatResponse(
-        question=request.question,
-        answer=answer,
-        sources=docs,
+    rfp_docs = rfp_search_engine.search(query=request.question, top_k=request.top_k)
+
+    # 1. Recherche ciblée sur l'expérience N7 Consulting et les filières ENSEEIHT
+    n7_docs = knowledge_engine.search(
+        query=f"{request.question} études réalisées N7 Consulting compétences filières ENSEEIHT SN 3EA MFEE tarif JEH",
+        top_k=4,
     )
+    for d in n7_docs:
+        d["section"] = f"[EXPÉRIENCE & COMPÉTENCES N7] {d.get('section', 'N7')}"
+
+    # 2. Recherche ciblée sur le Cadre Légal CNJE
+    legal_docs = knowledge_engine.search(
+        query=f"{request.question} cadre légal CLR CNJE régie pénalités de retard garantie propriété intellectuelle",
+        top_k=4,
+    )
+    for d in legal_docs:
+        d["section"] = f"[CADRE LÉGAL CNJE] {d.get('section', 'CLR CNJE')}"
+
+    seen: set[str] = set()
+    combined: list[dict[str, Any]] = []
+    for doc in rfp_docs + n7_docs + legal_docs:
+        key = str(doc.get("id", doc["text"][:50]))
+        if key not in seen:
+            seen.add(key)
+            combined.append(doc)
+
+    answer = synthesizer.answer_question(request.question, combined)
+    return ChatResponse(question=request.question, answer=answer, sources=combined)
 
 
 @app.get("/dossier-n7", response_model=N7BiddingDossier)
 def generate_n7_dossier() -> N7BiddingDossier:
-    docs = search_engine.search(
-        query="cahier des charges objectifs techniques budget délais contraintes",
-        top_k=25,
-    )
-    if not docs:
+    if not rfp_search_engine.documents:
         raise HTTPException(
             status_code=400,
-            detail="Aucun document indexé. Veuillez d'abord uploader un CCTP/CCAP.",
+            detail="Aucun document indexé. Déposez d'abord un CCTP PDF.",
         )
+
+    queries = [
+        "objet du marché acheteur client contexte besoins techniques architecture livrables",
+        "pénalités de retard déplafonnées responsabilité garantie maintenance astreinte",
+        "régie intégration équipe feuille de temps horaires sous-traitance propriété intellectuelle",
+        "budget chiffrage délais planning durée réalisation jours homme",
+    ]
+    seen: set[str] = set()
+    aggregated: list[dict[str, Any]] = []
+    for q in queries:
+        for doc in rfp_search_engine.search(query=q, top_k=4):
+            did = str(doc.get("id", doc["text"][:40]))
+            if did not in seen:
+                seen.add(did)
+                aggregated.append(doc)
+
+    n7_and_legal = knowledge_engine.search(
+        query="filières ENSEEIHT études passées N7 Consulting tarif JEH règles CNJE pénalités régie garantie PI",
+        top_k=5,
+    )
+
     try:
-        return synthesizer.generate_dossier(docs)
-    except Exception as e:
+        return synthesizer.generate_dossier(aggregated[:14], legal_chunks=n7_and_legal)
+    except Exception as exc:
+        logger.exception("Erreur lors de la génération du dossier N7")
         raise HTTPException(
-            status_code=500, detail=f"Erreur génération dossier: {e!s}"
-        ) from e
+            status_code=500, detail=f"Erreur génération dossier : {exc}"
+        ) from exc
