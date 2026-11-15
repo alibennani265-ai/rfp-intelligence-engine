@@ -140,7 +140,7 @@ Le projet intègre un harnais d'évaluation reproductible (`rfp_engine.evaluatio
 | **Static Quality Gates** | **`0 Errors`** | Validation stricte sous `ruff check src/` et `mypy src/ --ignore-missing-imports`. |
 
 ### Limites Connues & Roadmap Technique
-* **Échelle du jeu d'évaluation :** Le score de `1.0` valide l'intégrité du pipeline de retrieval hybride et d'extraction sur le référentiel interne N7. L'extension vers un benchmark de 50+ CCTP annotés avec métriques **LLM-as-a-Judge (Faithfulness & Context Relevance)** est documentée dans [`docs/EVALUATION.md`](docs/EVALUATION.md).
+* **Échelle du jeu d'évaluation :** Le benchmark porte sur **31 blocs documentaires** (historique de 40 études N7, règlement CNJE, catalogue des filières SN/3EA/MFEE et playbook contractuel) évalués sur **10 requêtes complexes**. L'extension vers un benchmark de 50+ CCTP annotés avec métriques **LLM-as-a-Judge (Faithfulness & Context Relevance)** est documentée dans [`docs/EVALUATION.md`](docs/EVALUATION.md).
 * **Tableaux PDF multi-colonnes :** `pypdf` extrait efficacement le texte structuré mais peut perdre l'alignement des Bordereaux de Prix Unitaires (BPU) complexes. L'intégration de `Docling` est prévue en v1.1.
 
 ---
