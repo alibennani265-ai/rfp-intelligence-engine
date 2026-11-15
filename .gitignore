@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Base vectorielle locale & PDFs clients
+data/qdrant_db/
+data/*.pdf
+!data/past_studies/**
