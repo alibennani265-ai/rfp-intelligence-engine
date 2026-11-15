@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+
 from rfp_engine.api.main import app
 
 
@@ -19,7 +20,9 @@ def run_e2e_audit() -> None:
             files={"file": ("test_cctp_airbus.pdf", pdf_file, "application/pdf")},
         )
     assert upload.status_code == 200, f"Upload failed: {upload.text}"
-    print(f"[OK] 3/3 - Upload & indexation CCTP : {upload.json()['total_requirements']} blocs extraits")
+    print(
+        f"[OK] 3/3 - Upload & indexation CCTP : {upload.json()['total_requirements']} blocs extraits"
+    )
 
 
 if __name__ == "__main__":

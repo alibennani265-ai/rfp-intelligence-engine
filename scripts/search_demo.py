@@ -32,7 +32,7 @@ def main():
 
     print("\n================ RÉSULTATS DE RECHERCHE HYBRIDE ================\n")
     for q in queries:
-        print(f"🔍 REQUÊTE : \"{q}\"")
+        print(f'🔍 REQUÊTE : "{q}"')
         results = engine.search(q, top_k=2)
         for res in results:
             print(f"  • [{res['id']}] (Score BM25: {res['score']:.2f})")
