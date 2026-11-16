@@ -12,7 +12,7 @@ from rfp_engine.ingestion.study_ingestor import N7PastStudyIngestor
 from rfp_engine.retrieval.vector_store import HybridSearchEngine
 from rfp_engine.synthesis.generator import N7BiddingDossier, RFPSynthesizer
 
-app = FastAPI(title="N7 Strategic Bidding Engine", version="1.3.0")
+app = FastAPI(title="N7 Strategic Bidding Engine", version="1.4.0")
 
 rfp_search_engine = HybridSearchEngine(collection_name="rfp_requirements")
 knowledge_engine = HybridSearchEngine(collection_name="n7_past_studies")
@@ -96,7 +96,6 @@ def ingest_past_studies() -> dict[str, Any]:
 def chat_with_rfp(request: ChatRequest) -> ChatResponse:
     rfp_docs = rfp_search_engine.search(query=request.question, top_k=request.top_k)
 
-    # 1. Recherche ciblée sur l'expérience N7 Consulting et les filières ENSEEIHT
     n7_docs = knowledge_engine.search(
         query=f"{request.question} études réalisées N7 Consulting compétences filières ENSEEIHT SN 3EA MFEE tarif JEH",
         top_k=4,
@@ -104,7 +103,6 @@ def chat_with_rfp(request: ChatRequest) -> ChatResponse:
     for d in n7_docs:
         d["section"] = f"[EXPÉRIENCE & COMPÉTENCES N7] {d.get('section', 'N7')}"
 
-    # 2. Recherche ciblée sur le Cadre Légal CNJE
     legal_docs = knowledge_engine.search(
         query=f"{request.question} cadre légal CLR CNJE régie pénalités de retard garantie propriété intellectuelle",
         top_k=4,
@@ -132,20 +130,35 @@ def generate_n7_dossier() -> N7BiddingDossier:
             detail="Aucun document indexé. Déposez d'abord un CCTP PDF.",
         )
 
-    queries = [
-        "objet du marché acheteur client contexte besoins techniques architecture livrables",
-        "pénalités de retard déplafonnées responsabilité garantie maintenance astreinte",
-        "régie intégration équipe feuille de temps horaires sous-traitance propriété intellectuelle",
-        "budget chiffrage délais planning durée réalisation jours homme",
-    ]
+    all_docs = sorted(rfp_search_engine.documents, key=lambda d: str(d.get("id", "")))
     seen: set[str] = set()
     aggregated: list[dict[str, Any]] = []
+
+    def _add(doc: dict[str, Any]) -> None:
+        did = str(doc.get("id", doc["text"][:40]))
+        if did not in seen:
+            seen.add(did)
+            aggregated.append(doc)
+
+    # 1. Toujours inclure les premiers blocs (objet du marché, acheteur, contexte)
+    for doc in all_docs[:4]:
+        _add(doc)
+
+    # 2. Recherche ciblée sur la technique, les pénalités/indemnités, la régie et les délais
+    queries = [
+        "objet prestations missions livrables architecture développement technique",
+        "pénalités indemnités de retard déplafonnées plafond sanction mise en demeure",
+        "régie intégration équipe feuille de temps horaires sous-traitance astreinte",
+        "garantie maintenance responsabilité civile propriété intellectuelle résiliation",
+        "budget montant maximum minimum commande délais exécution durée",
+    ]
     for q in queries:
         for doc in rfp_search_engine.search(query=q, top_k=4):
-            did = str(doc.get("id", doc["text"][:40]))
-            if did not in seen:
-                seen.add(did)
-                aggregated.append(doc)
+            _add(doc)
+
+    # 3. Inclure les derniers blocs (clauses juridiques de fin de marché)
+    for doc in all_docs[-3:]:
+        _add(doc)
 
     n7_and_legal = knowledge_engine.search(
         query="filières ENSEEIHT études passées N7 Consulting tarif JEH règles CNJE pénalités régie garantie PI",
@@ -153,7 +166,7 @@ def generate_n7_dossier() -> N7BiddingDossier:
     )
 
     try:
-        return synthesizer.generate_dossier(aggregated[:14], legal_chunks=n7_and_legal)
+        return synthesizer.generate_dossier(aggregated[:22], legal_chunks=n7_and_legal)
     except Exception as exc:
         logger.exception("Erreur lors de la génération du dossier N7")
         raise HTTPException(
