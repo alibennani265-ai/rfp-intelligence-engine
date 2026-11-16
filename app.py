@@ -109,7 +109,7 @@ with tab2:
         with st.spinner(
             "Analyse approfondie des clauses du CCTP et génération du dossier..."
         ):
-            res = requests.get(f"{API_URL}/dossier-n7", timeout=240)
+            res = requests.get(f"{API_URL}/dossier-n7", timeout=600)
             if res.status_code == 200:
                 st.session_state["dossier_cache"] = res.json()
             else:
