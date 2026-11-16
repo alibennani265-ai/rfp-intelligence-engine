@@ -169,6 +169,25 @@ class RFPSynthesizer:
     def __init__(self, model_name: str = "ollama/llama3.1:8b") -> None:
         self.model_name = model_name
 
+    def _call_llm(
+        self,
+        prompt: str,
+        temperature: float = 0.15,
+        max_tokens: int = 2500,
+        json_mode: bool = False,
+    ) -> str:
+        kwargs: dict[str, Any] = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "extra_body": {"options": {"num_ctx": 16384}},
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = completion(**kwargs)
+        return str(response.choices[0].message.content).strip()
+
     def answer_question(self, query: str, requirements: list[dict[str, Any]]) -> str:
         context_text = "\n\n".join(
             [
@@ -183,7 +202,7 @@ Réponds en croisant les clauses du CCTP/CCAP client, les compétences ENSEEIHT 
 
 FILIÈRES ENSEEIHT (RÈGLE DE ROUTAGE STRICT) :
 {dept_info}
-- Tout projet 100% logiciel, web, SaaS, plateforme, data, IA ou déploiement cloud/DevOps relève EXCLUSIVEMENT de la filière **SN (Sciences du Numérique)**. Ne mentionne jamais 3EA ou MFEE sauf s'il y a explicitement du matériel électronique/embarqué ou de la mécanique des fluides/thermique dans le marché.
+- Tout projet logiciel, web, SaaS, plateforme, data, IA ou déploiement cloud relève EXCLUSIVEMENT de la filière **SN (Sciences du Numérique)**. Ne cite 3EA ou MFEE que si le texte mentionne explicitement du matériel électronique/embarqué ou de la mécanique des fluides/thermique.
 
 EXTRAITS DOCUMENTAIRES (MARCHÉ CLIENT + ÉTUDES N7 + CLR CNJE) :
 {context_text}
@@ -195,51 +214,153 @@ Structure ta réponse en 3 parties :
 ### 2. Audit de Conformité Légale (CLR CNJE)
 ### 3. Recommandation Commerciale
 """
-        response = completion(
-            model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-        )
-        return str(response.choices[0].message.content)
+        return self._call_llm(prompt, temperature=0.2, max_tokens=2000)
 
-    def _deep_audit_reasoning(
-        self, rfp_context: str, legal_context: str, dept_info: str
+    def _agent_legal_audit(self, rfp_context: str, legal_context: str) -> str:
+        """Agent 1 : Auditeur Légal CNJE spécialisé — extrait uniquement les faits juridiques sourcés du marché."""
+        prompt = f"""Tu es l'Auditeur Légal CNJE de N7 Consulting.
+Lis TOUS les extraits du marché client ci-dessous et relève chaque fait contractuel avec sa référence d'article/page exacte.
+Ne devine rien : si une clause est absente, écris "Non mentionné dans les extraits".
+
+CADRE LÉGAL CNJE :
+{CNJE_RULES}
+{legal_context}
+
+EXTRAITS DU MARCHÉ CLIENT :
+{rfp_context}
+
+Rédige un constat juridique factuel en répondant point par point :
+1. **Acheteur & Objet exact** : Nom de l'organisme acheteur et nature technique réelle des prestations demandées.
+2. **Mode d'exécution (Forfait vs Régie)** : Le marché impose-t-il une présence sur site, une intégration dans l'équipe client, des feuilles de temps/pointage, ou un engagement au forfait sur livrables ? (Cite le texte exact).
+3. **Pénalités & Indemnités de retard** : Y a-t-il des pénalités ou indemnités de retard ? Sont-elles plafonnées ou **déplafonnées** / journalières / sans mise en demeure ? (Cite le texte et l'article exact).
+4. **Garanties, Maintenance, Astreintes & PI** : Durée de garantie demandée, astreintes éventuelles, sous-traitance, cession de propriété intellectuelle.
+5. **Verdict Juridique CNJE** :
+   - Si régie/subordination, feuilles de temps, astreintes ou sous-traitance obligatoire -> **NO-GO (BLOQUANT CNJE)**.
+   - Si pénalités/indemnités de retard déplafonnées, garantie > 3 mois ou clauses financières déséquilibrées -> **GO SOUS RÉSERVE DE RENÉGOCIATION**.
+   - Si aucune clause problématique trouvée dans le texte -> **GO STRATÉGIQUE**.
+"""
+        logger.info("Agent 1/3 : Audit juridique factuel CNJE...")
+        return self._call_llm(prompt, temperature=0.1, max_tokens=1600)
+
+    def _agent_technical_scoping(
+        self, rfp_context: str, legal_audit: str, dept_info: str
     ) -> str:
-        """Passe 1 : Réflexion libre approfondie (sans contrainte JSON) pour détecter toutes les clauses et bâtir le chiffrage."""
-        reasoning_prompt = f"""Tu es le Vice-Président Commercial et Auditeur Légal CNJE de N7 Consulting (Junior-Entreprise de l'ENSEEIHT — Centrale Toulouse).
-Lis attentivement l'intégralité des extraits du marché client ci-dessous et rédige une note d'analyse stratégique interne complète avant décision.
+        """Agent 2 : Architecte ENSEEIHT & Chiffrage — dimensionne les compétences et phases uniquement d'après le besoin technique."""
+        prompt = f"""Tu es le Directeur Technique (CTO) de N7 Consulting (ENSEEIHT).
+À partir des extraits du marché et de l'audit juridique, dimensionne l'équipe étudiante et le découpage financier en JEH.
 
 FILIÈRES ENSEEIHT :
 {dept_info}
 
-CADRE LÉGAL CNJE (LIGNES ROUGES) :
-{CNJE_RULES}
-{legal_context}
+RÈGLE ABSOLUE DE ROUTAGE DES FILIÈRES :
+- Si le marché concerne du logiciel, développement web/mobile, plateforme, data, IA, SI ou cloud -> utilise **UNIQUEMENT la filière SN**. Interdiction absolue d'inclure 3EA ou MFEE.
+- N'inclus **3EA** que si le texte mentionne des cartes électroniques, capteurs, FPGA, systèmes embarqués ou automatisme.
+- N'inclus **MFEE** que si le texte mentionne de la mécanique des fluides (CFD), thermique, hydraulique ou énergie.
 
-EXTRAITS DU MARCHÉ CLIENT (CCTP / CCAP / RC) :
+CONSTAT JURIDIQUE DÉJÀ ÉTABLI :
+{legal_audit}
+
+EXTRAITS TECHNIQUES DU MARCHÉ :
 {rfp_context}
 
-ANALYSE EN PROFONDEUR LES 5 POINTS SUIVANTS (SOIS CRITIQUE ET FACTUEL) :
-1. **Objet réel du marché & Client** : Quel est le nom exact de l'acheteur et quelle est la prestation technique concrète demandée (et NON "mettre en place un accord-cadre") ?
-2. **Audit Juridique CNJE (Chasse aux clauses bloquantes)** :
-   - Y a-t-il des **pénalités ou indemnités de retard déplafonnées**, journalières, automatiques ou sans mise en demeure ? (Si oui : RISQUE MAJEUR CNJE).
-   - Y a-t-il une obligation de **régie**, d'intégration dans l'équipe client, de **feuilles de temps / pointage horaire**, d'**astreinte**, de **sous-traitance**, ou une **obligation de résultat** / garantie > 3 mois ?
-   - La Plus-Value Pédagogique (PVP) pour les étudiants ENSEEIHT est-elle réelle ou s'agit-il d'exécution répétitive sans valeur intellectuelle ?
-3. **Verdict Go / No-Go & Score** :
-   - Si présence de régie, feuilles de temps, astreintes, sous-traitance ou absence de PVP -> **NO-GO (BLOQUANT CNJE)** (Score < 40/100).
-   - Si présence de pénalités/indemnités de retard déplafonnées, prix fermes risqués, garantie excessive ou clauses abusives -> **GO SOUS RÉSERVE DE RENÉGOCIATION** (Score entre 40 et 65/100).
-   - Uniquement si 100% conforme CNJE sans clause bloquante -> **GO STRATÉGIQUE** (Score > 75/100).
-4. **Staffing ENSEEIHT adapté** : Quels profils étudiants précis (SN pour logiciel/data/IA/web ; 3EA uniquement si électronique/embarqué ; MFEE uniquement si fluides/thermique) ?
-5. **Découpage complet en 3 à 5 phases avec chiffrage réaliste en JEH** : Détaille chaque phase du projet (ex: Phase 1 Cadrage & Spécifications, Phase 2 Développement / Conception cœur, Phase 3 Intégration / Tests / Sécurité, Phase 4 Recette & Documentation) avec un nombre de JEH cohérent avec l'ampleur du marché (jamais une seule phase de 6 JEH).
+Rédige le dimensionnement technique en 3 points :
+1. **Filière(s) ENSEEIHT strictement requise(s)** et profils étudiants (ex: Chef de projet / Architecte SN + Développeurs SN).
+2. **Découpage en 3 à 5 phases cohérentes** avec l'ampleur réelle du marché (ex: Phase 1 Cadrage & Spécifications, Phase 2 Développement / Conception, Phase 3 Tests & Intégration, Phase 4 Recette & Documentation) et estimation réaliste en JEH entiers.
+3. **Argumentaire technique N7 Consulting** basé sur les compétences de la filière retenue et les études passées similaires.
 """
-        logger.info("Passe 1/2 : Réflexion critique approfondie sur le marché...")
-        res = completion(
-            model=self.model_name,
-            messages=[{"role": "user", "content": reasoning_prompt}],
-            temperature=0.2,
-            max_tokens=2200,
+        logger.info("Agent 2/3 : Dimensionnement technique & chiffrage JEH...")
+        return self._call_llm(prompt, temperature=0.15, max_tokens=1600)
+
+    @staticmethod
+    def _enforce_consistency(
+        dossier: N7BiddingDossier, rfp_text_lower: str
+    ) -> N7BiddingDossier:
+        """Verrou déterministe anti-contradiction entre l'audit juridique, le staffing et la décision finale."""
+        has_hardware = any(
+            k in rfp_text_lower
+            for k in (
+                "électronique",
+                "embarqué",
+                "fpga",
+                "microcontrôleur",
+                "capteur",
+                "automatisme",
+                "signal",
+            )
         )
-        return str(res.choices[0].message.content).strip()
+        has_fluids = any(
+            k in rfp_text_lower
+            for k in (
+                "mécanique des fluides",
+                "cfd",
+                "thermique",
+                "hydraulique",
+                "aérodynamique",
+            )
+        )
+
+        filtered_staffing = []
+        for s in dossier.staffing_enseeiht:
+            fil = s.filiere.upper()
+            if "3EA" in fil and not has_hardware:
+                continue
+            if "MFEE" in fil and not has_fluids:
+                continue
+            filtered_staffing.append(s)
+
+        if not filtered_staffing:
+            filtered_staffing = [
+                ENSEEIHTStaffing(
+                    filiere="SN",
+                    niveau="2A / 3A ENSEEIHT",
+                    nombre_etudiants=2,
+                    competences_cles=[
+                        "Architecture Logicielle",
+                        "Développement Full-Stack",
+                        "Data & IA",
+                    ],
+                    role_dans_projet="Conception, développement et recette des livrables numériques",
+                )
+            ]
+        dossier.staffing_enseeiht = filtered_staffing
+
+        # Vérification stricte de cohérence entre les statuts CNJE / clauses à renégocier et le verdict Go/No-Go
+        statuses = [c.statut.upper() for c in dossier.conformite_cnje]
+        comments_blob = " ".join(
+            [c.commentaire.lower() for c in dossier.conformite_cnje]
+            + [cl.lower() for cl in dossier.clauses_a_renegocier]
+            + [dossier.raisonnement_auditeur.lower()]
+        )
+        has_non_conforme = any("NON CONFORME" in s or "BLOQUANT" in s for s in statuses)
+        has_to_negotiate = (
+            any("NÉGOCIER" in s or "NEGOCIER" in s for s in statuses)
+            or len(dossier.clauses_a_renegocier) > 0
+        )
+        has_deplafonne = "déplafonn" in comments_blob or "deplafonn" in comments_blob
+        has_regie = any(
+            w in comments_blob
+            for w in (
+                "prêt de main",
+                "régie",
+                "feuille de temps",
+                "subordination",
+                "astreinte 24",
+            )
+        )
+
+        if has_non_conforme or has_regie:
+            dossier.decision_gonogo = "NO-GO (BLOQUANT CNJE)"
+            dossier.score_opportunite = min(dossier.score_opportunite, 38)
+        elif has_to_negotiate or has_deplafonne:
+            if "GO STRAT" in dossier.decision_gonogo.upper():
+                dossier.decision_gonogo = "GO SOUS RÉSERVE DE RENÉGOCIATION"
+            dossier.score_opportunite = min(max(dossier.score_opportunite, 42), 68)
+
+        if dossier.ventilation_financiere:
+            dossier.total_jeh_estime = sum(
+                p.jeh_estimes for p in dossier.ventilation_financiere
+            )
+        return dossier
 
     def generate_dossier(
         self,
@@ -260,64 +381,54 @@ ANALYSE EN PROFONDEUR LES 5 POINTS SUIVANTS (SOIS CRITIQUE ET FACTUEL) :
         )
         dept_info = json.dumps(ENSEEIHT_DEPARTMENTS, ensure_ascii=False, indent=2)
 
-        # Passe 1 : Raisonnement critique libre
-        audit_notes = self._deep_audit_reasoning(rfp_context, legal_context, dept_info)
+        legal_audit = self._agent_legal_audit(rfp_context, legal_context)
+        tech_scoping = self._agent_technical_scoping(
+            rfp_context, legal_audit, dept_info
+        )
 
-        # Passe 2 : Conversion fidèle de l'analyse en JSON structuré
-        json_prompt = f"""Transforme la note d'analyse stratégique ci-dessous en un objet JSON strictement conforme au schéma demandé.
-Ne perds AUCUNE clause critique, AUCUN risque (notamment les pénalités/indemnités de retard déplafonnées) et conserve l'intégralité des phases de chiffrage (minimum 3 à 5 phases).
+        json_prompt = f"""Assemble le dossier final d'avant-vente N7 Consulting au format JSON en synthétisant FIDÈLEMENT les deux rapports d'experts ci-dessous.
+RÈGLE DE COHÉRENCE ABSOLUE :
+- Chaque ligne du tableau "conformite_cnje" DOIT être 100 % cohérente avec "clauses_a_renegocier" et "decision_gonogo" (ne jamais écrire qu'une clause est conforme si elle apparaît dans les clauses à renégocier).
+- N'invente aucune clause absente du rapport juridique.
 
-NOTE D'ANALYSE STRATÉGIQUE :
-{audit_notes}
+=== RAPPORT AGENT 1 : AUDIT JURIDIQUE CNJE ===
+{legal_audit}
 
-RÈGLES DE MAPPING JSON :
-- "decision_gonogo" : reprend exactement le verdict de l'analyse ("NO-GO (BLOQUANT CNJE)", "GO SOUS RÉSERVE DE RENÉGOCIATION" ou "GO STRATÉGIQUE").
-- "argumentaire_commercial_n7" : explique la légitimité technique des filières ENSEEIHT et les études similaires réalisées par N7 Consulting sur le cœur technique du projet (jamais "expertise dans la mise en place d'accords-cadres").
-- "conformite_cnje" : au moins 4 critères précis (Plus-Value Pédagogique, Régie / Forfait, Pénalités & Indemnités de retard, Garantie & Propriété Intellectuelle).
-- "ventilation_financiere" : au moins 3 à 5 phases distinctes et détaillées avec des JEH entiers réalistes.
-- "clauses_a_renegocier" : liste toutes les clauses problématiques identifiées (pénalités déplafonnées, durée, garantie, etc.).
+=== RAPPORT AGENT 2 : DIMENSIONNEMENT TECHNIQUE & CHIFFRAGE ===
+{tech_scoping}
 
-Réponds UNIQUEMENT avec un objet JSON valide respectant ces clés exactes :
+Réponds UNIQUEMENT avec un objet JSON valide respectant exactement ce schéma :
 {{
-  "raisonnement_auditeur": "Résumé structuré du raisonnement critique (4-6 phrases)",
+  "raisonnement_auditeur": "Synthèse fidèle des constats juridiques et techniques des 2 agents",
   "titre_marche": "Objet technique réel du marché",
   "client": "Nom exact de l'acheteur",
   "decision_gonogo": "NO-GO (BLOQUANT CNJE) | GO SOUS RÉSERVE DE RENÉGOCIATION | GO STRATÉGIQUE",
   "score_opportunite": 55,
-  "synthese_executive": "Synthèse complète du périmètre technique, financier et juridique",
-  "argumentaire_commercial_n7": "Argumentaire technique ENSEEIHT + références N7 Consulting",
+  "synthese_executive": "Synthèse complète du périmètre technique, juridique et financier",
+  "argumentaire_commercial_n7": "Argumentaire technique ENSEEIHT basé sur le rapport de l'Agent 2",
   "conformite_cnje": [
-    {{"critere": "string", "statut": "CONFORME | À NÉGOCIER | NON CONFORME", "commentaire": "string"}}
+    {{"critere": "Critère audité", "statut": "CONFORME | À NÉGOCIER | NON CONFORME", "commentaire": "Constat exact avec référence article/page"}}
   ],
   "staffing_enseeiht": [
     {{"filiere": "SN", "niveau": "2A / 3A ENSEEIHT", "nombre_etudiants": 2, "competences_cles": ["string"], "role_dans_projet": "string"}}
   ],
   "ventilation_financiere": [
-    {{"phase": "Phase 1 : ...", "description": "string", "jeh_estimes": 8, "profil_associe": "string"}}
+    {{"phase": "Phase 1 : ...", "description": "Livrables précis", "jeh_estimes": 8, "profil_associe": "string"}}
   ],
   "total_jeh_estime": 30,
   "matrice_risques": [
-    {{"domaine": "Juridique | Technique | Financier", "description": "string", "impact": "Critique | Élevé | Moyen", "plan_mitigation": "string"}}
+    {{"domaine": "Juridique | Technique | Financier", "description": "Risque réel identifié", "impact": "Critique | Élevé | Moyen", "plan_mitigation": "Action concrète"}}
   ],
-  "clauses_a_renegocier": ["string"],
-  "recommandations_commerciales": ["string"]
+  "clauses_a_renegocier": ["Uniquement les clauses réellement problématiques relevées par l'Agent 1"],
+  "recommandations_commerciales": ["Action concrète d'avant-vente"]
 }}
 """
-        logger.info("Passe 2/2 : Structuration JSON du dossier N7...")
-        response = completion(
-            model=self.model_name,
-            messages=[{"role": "user", "content": json_prompt}],
-            temperature=0.1,
-            max_tokens=2800,
-            response_format={"type": "json_object"},
+        logger.info("Agent 3/3 : Assemblage JSON cohérent du dossier N7...")
+        content = self._call_llm(
+            json_prompt, temperature=0.1, max_tokens=2800, json_mode=True
         )
-        content = str(response.choices[0].message.content).strip()
         match = re.search(r"\{.*\}", content, re.DOTALL)
         dossier = N7BiddingDossier.model_validate_json(
             match.group(0) if match else content
         )
-        if dossier.ventilation_financiere:
-            dossier.total_jeh_estime = sum(
-                p.jeh_estimes for p in dossier.ventilation_financiere
-            )
-        return dossier
+        return self._enforce_consistency(dossier, rfp_context.lower())
