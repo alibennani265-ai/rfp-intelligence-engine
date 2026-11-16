@@ -23,7 +23,7 @@
 
 ## 📌 Vision & Problématique Métier
 
-**N7 Consulting**, la Junior-Entreprise de l'**ENSEEIHT (Centrale Toulouse)**, qualifie et chiffre chaque mois des dizaines d'appels d'offres et de Cahiers des Charges (CCTP / CCAP) dans l'aéronautique, le spatial, l'énergie et le numérique.
+**N7 Consulting**, la Junior-Entreprise de l'**ENSEEIHT (Centrale Toulouse)**, qualifie et chiffre chaque année des dizaines d'appels d'offres et de Cahiers des Charges (CCTP / CCAP) dans l'aéronautique, le spatial, l'énergie et le numérique.
 
 La rédaction d'une proposition commerciale conforme exige de croiser **trois référentiels critiques** sous contrainte de temps :
 
